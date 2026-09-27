@@ -1,0 +1,79 @@
+name: Megila encrypted runner
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'preview, production, or OCR QA'
+        required: true
+        type: choice
+        options: [preview, production, ocr]
+permissions:
+  contents: read
+jobs:
+  deploy:
+    if: github.event_name == 'workflow_dispatch' && inputs.target != 'ocr'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Decrypt branch package and validate
+        env:
+          MEGILA_AGE_SECRET_KEY: ${{ secrets.MEGILA_AGE_SECRET_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$MEGILA_AGE_SECRET_KEY"
+          curl -fsSL https://github.com/FiloSottile/age/releases/download/v1.2.1/age-v1.2.1-linux-amd64.tar.gz -o /tmp/age.tar.gz
+          echo '7df45a6cc87d4da11cc03a539a7470c15b1041ab2b396af088fe9990f7c79d50  /tmp/age.tar.gz' | sha256sum -c -
+          tar -xzf /tmp/age.tar.gz -C /tmp
+          printf '%s\n' "$MEGILA_AGE_SECRET_KEY" > /tmp/age-key.txt
+          chmod 600 /tmp/age-key.txt
+          /tmp/age/age -d -i /tmp/age-key.txt -o /tmp/private.tar.gz private.tar.gz.age
+          rm -f /tmp/age-key.txt
+          mkdir private
+          tar -xzf /tmp/private.tar.gz -C private
+          rm -f /tmp/private.tar.gz
+          test -s private/source.zip
+      - name: Deploy encrypted app
+        if: inputs.target == 'preview' || (inputs.target == 'production' && github.ref_name == 'main')
+        working-directory: private
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+        run: bash deploy.sh '${{ inputs.target }}'
+  audit:
+    if: github.ref_name == 'epub-preview' && github.event_name == 'workflow_dispatch' && inputs.target == 'ocr'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      max-parallel: 10
+      matrix:
+        book: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Decrypt QA package
+        env:
+          MEGILA_AGE_SECRET_KEY: ${{ secrets.MEGILA_AGE_SECRET_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$MEGILA_AGE_SECRET_KEY"
+          curl -fsSL https://github.com/FiloSottile/age/releases/download/v1.2.1/age-v1.2.1-linux-amd64.tar.gz -o /tmp/age.tar.gz
+          echo '7df45a6cc87d4da11cc03a539a7470c15b1041ab2b396af088fe9990f7c79d50  /tmp/age.tar.gz' | sha256sum -c -
+          tar -xzf /tmp/age.tar.gz -C /tmp
+          printf '%s\n' "$MEGILA_AGE_SECRET_KEY" > /tmp/age-key.txt
+          chmod 600 /tmp/age-key.txt
+          /tmp/age/age -d -i /tmp/age-key.txt -o /tmp/private.tar.gz private.tar.gz.age
+          rm -f /tmp/age-key.txt
+          mkdir private
+          tar -xzf /tmp/private.tar.gz -C private
+          rm -f /tmp/private.tar.gz
+          test -s private/audit.sh
+      - name: Audit
+        working-directory: private
+        run: bash audit.sh '${{ matrix.book }}'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ocr-${{ matrix.book }}
+          path: private/qa/results/
+          retention-days: 14
