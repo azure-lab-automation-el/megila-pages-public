@@ -40,8 +40,8 @@ printf '\nPrivate job exit code: %s\n' "$rc" >>"$log"
 /tmp/age/age -r "$recipient" -o private-output/job.log.age "$log" >/dev/null 2>&1 || { rm -f "$log"; echo 'Private job log encryption failed.'; exit 1; }
 rm -f "$log" /tmp/age-key.txt /tmp/private.tar.gz
 if [ "$mode" = audit ] && [ -d private/qa/results ]; then
-  tar -czf /tmp/qa-results.tar.gz -C private qa/results >/dev/null 2>&1 || { echo 'Private result packaging failed.'; exit 1; }
-  /tmp/age/age -r "$recipient" -o private-output/qa-results.tar.gz.age /tmp/qa-results.tar.gz >/dev/null 2>&1 || { rm -f /tmp/qa-results.tar.gz; echo 'Private result encryption failed.'; exit 1; }
+  tar -czf /tmp/qa-results.tar.gz -C private qa/results >/dev/null 2>&1 || { rm -rf private; echo 'Private result packaging failed.'; exit 1; }
+  /tmp/age/age -r "$recipient" -o private-output/qa-results.tar.gz.age /tmp/qa-results.tar.gz >/dev/null 2>&1 || { rm -f /tmp/qa-results.tar.gz; rm -rf private; echo 'Private result encryption failed.'; exit 1; }
   rm -f /tmp/qa-results.tar.gz
 fi
 rm -rf private
